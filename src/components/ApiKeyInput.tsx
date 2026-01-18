@@ -15,6 +15,9 @@ export function ApiKeyInput({ apiKey, onApiKeyChange, error }: ApiKeyInputProps)
   const [inputValue, setInputValue] = useState(apiKey);
   const [isEditing, setIsEditing] = useState(!apiKey);
 
+  // Check if using env var
+  const hasEnvVar = Boolean(import.meta.env.VITE_GROQ_API_KEY);
+
   const handleSave = () => {
     onApiKeyChange(inputValue);
     setIsEditing(false);
@@ -25,6 +28,28 @@ export function ApiKeyInput({ apiKey, onApiKeyChange, error }: ApiKeyInputProps)
     onApiKeyChange('');
     setIsEditing(true);
   };
+
+  // If env var is set, show read-only state
+  if (hasEnvVar) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="glass rounded-2xl p-4 mb-4"
+      >
+        <div className="flex items-center gap-2">
+          <div className="p-2 rounded-lg bg-neon-green/20">
+            <Key className="w-4 h-4 text-neon-green" />
+          </div>
+          <span className="text-sm font-medium text-foreground">Groq API Key</span>
+          <div className="ml-auto flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-neon-green animate-pulse" />
+            <span className="text-xs text-muted-foreground">Configured via environment</span>
+          </div>
+        </div>
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div

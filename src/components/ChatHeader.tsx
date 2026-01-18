@@ -1,14 +1,16 @@
 import { motion } from 'framer-motion';
-import { Sparkles, Trash2, Settings } from 'lucide-react';
+import { Sparkles, Trash2, Settings, LogOut, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 interface ChatHeaderProps {
   onClear: () => void;
   onSettingsClick: () => void;
   messageCount: number;
+  onSignOut?: () => void;
+  userEmail?: string;
 }
 
-export function ChatHeader({ onClear, onSettingsClick, messageCount }: ChatHeaderProps) {
+export function ChatHeader({ onClear, onSettingsClick, messageCount, onSignOut, userEmail }: ChatHeaderProps) {
   return (
     <motion.header
       initial={{ opacity: 0, y: -20 }}
@@ -32,6 +34,14 @@ export function ChatHeader({ onClear, onSettingsClick, messageCount }: ChatHeade
       </div>
 
       <div className="flex items-center gap-2">
+        {/* User Email Badge */}
+        {userEmail && (
+          <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-muted/50 border border-border mr-2">
+            <User className="w-3 h-3 text-muted-foreground" />
+            <span className="text-xs text-muted-foreground max-w-[120px] truncate">{userEmail}</span>
+          </div>
+        )}
+
         <Button
           variant="ghost"
           size="icon"
@@ -40,12 +50,9 @@ export function ChatHeader({ onClear, onSettingsClick, messageCount }: ChatHeade
         >
           <Settings className="w-5 h-5" />
         </Button>
+
         {messageCount > 0 && (
-          <motion.div
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            transition={{ type: 'spring' }}
-          >
+          <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring' }}>
             <Button
               variant="ghost"
               size="icon"
@@ -55,6 +62,19 @@ export function ChatHeader({ onClear, onSettingsClick, messageCount }: ChatHeade
               <Trash2 className="w-5 h-5" />
             </Button>
           </motion.div>
+        )}
+
+        {/* Sign Out Button */}
+        {onSignOut && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onSignOut}
+            className="text-muted-foreground hover:text-accent hover:bg-accent/10"
+            title="Sign out"
+          >
+            <LogOut className="w-5 h-5" />
+          </Button>
         )}
       </div>
     </motion.header>
