@@ -13,7 +13,12 @@ const MODEL = 'llama-3.1-8b-instant';
 
 export function useChat() {
   const [messages, setMessages] = useLocalStorage<Message[]>('chat-messages', []);
-  const [apiKey, setApiKeyState] = useLocalStorage<string>('groq-api-key', '');
+  
+  // Priority: env var (Vercel) > localStorage (testing)
+  const envApiKey = import.meta.env.VITE_GROQ_API_KEY || '';
+  const [storedApiKey, setApiKeyState] = useLocalStorage<string>('groq-api-key', '');
+  const apiKey = envApiKey || storedApiKey;
+  
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -22,13 +27,6 @@ export function useChat() {
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamingIdRef = useRef<string | null>(null);
 
-  const setApiKey = useCallback(
-    (key: string) => {
-      setApiKeyState(key);
-      setError(null);
-    },
-    [setApiKeyState]
-  );
 
   const sendMessage = useCallback(
     async (content: string) => {
@@ -157,6 +155,14 @@ export function useChat() {
       }
     },
     [apiKey, messages, setMessages]
+  );
+
+  const setApiKey = useCallback(
+    (key: string) => {
+      setApiKeyState(key);
+      setError(null);
+    },
+    [setApiKeyState]
   );
 
   const clearMessages = useCallback(() => {
