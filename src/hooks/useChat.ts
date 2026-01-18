@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useLocalStorage } from './useLocalStorage';
 
 export interface Message {
@@ -16,6 +16,13 @@ export function useChat() {
   const [apiKey, setApiKeyState] = useLocalStorage<string>('groq-api-key', '');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // Use refs to prevent race conditions during streaming
+  const isLoadingRef = useRef(false);
+  const messagesRef = useRef(messages);
+  
+  // Keep messagesRef in sync
+  messagesRef.current = messages;
 
   const setApiKey = useCallback((key: string) => {
     setApiKeyState(key);
@@ -23,6 +30,9 @@ export function useChat() {
   }, [setApiKeyState]);
 
   const sendMessage = useCallback(async (content: string) => {
+    // Prevent duplicate submissions
+    if (isLoadingRef.current) return;
+    
     if (!apiKey) {
       setError('Please enter your Groq API key first');
       return;
@@ -35,8 +45,12 @@ export function useChat() {
       timestamp: Date.now(),
     };
 
-    setMessages(prev => [...prev, userMessage]);
+    // Get current messages from ref to avoid stale closure
+    const currentMessages = [...messagesRef.current, userMessage];
+    
+    setMessages(currentMessages);
     setIsLoading(true);
+    isLoadingRef.current = true;
     setError(null);
 
     try {
@@ -48,7 +62,7 @@ export function useChat() {
         },
         body: JSON.stringify({
           model: MODEL,
-          messages: [...messages, userMessage].map(m => ({
+          messages: currentMessages.map(m => ({
             role: m.role,
             content: m.content,
           })),
@@ -69,18 +83,19 @@ export function useChat() {
       const assistantId = `assistant-${Date.now()}`;
 
       // Add empty assistant message
-      setMessages(prev => [...prev, {
+      const messagesWithAssistant = [...currentMessages, {
         id: assistantId,
-        role: 'assistant',
+        role: 'assistant' as const,
         content: '',
         timestamp: Date.now(),
-      }]);
+      }];
+      setMessages(messagesWithAssistant);
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunk = decoder.decode(value);
+        const chunk = decoder.decode(value, { stream: true });
         const lines = chunk.split('\n').filter(line => line.trim() !== '');
 
         for (const line of lines) {
@@ -93,6 +108,7 @@ export function useChat() {
               const delta = parsed.choices?.[0]?.delta?.content;
               if (delta) {
                 assistantContent += delta;
+                // Update only the assistant message content
                 setMessages(prev => prev.map(m => 
                   m.id === assistantId 
                     ? { ...m, content: assistantContent }
@@ -100,7 +116,7 @@ export function useChat() {
                 ));
               }
             } catch (e) {
-              // Skip invalid JSON
+              // Skip invalid JSON (might be partial chunk)
             }
           }
         }
@@ -112,8 +128,9 @@ export function useChat() {
       setMessages(prev => prev.filter(m => m.role === 'user' || m.content));
     } finally {
       setIsLoading(false);
+      isLoadingRef.current = false;
     }
-  }, [apiKey, messages, setMessages]);
+  }, [apiKey, setMessages]);
 
   const clearMessages = useCallback(() => {
     setMessages([]);
