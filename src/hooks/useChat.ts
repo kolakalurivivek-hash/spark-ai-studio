@@ -19,12 +19,10 @@ export function useChat() {
   
   // Use refs to prevent race conditions during streaming
   const isLoadingRef = useRef(false);
-  const messagesRef = useRef<Message[]>([]);
+  const abortControllerRef = useRef<AbortController | null>(null);
   
-  // Keep messagesRef in sync using useEffect (not during render)
-  useEffect(() => {
-    messagesRef.current = messages;
-  }, [messages]);
+  // Track current streaming message to prevent duplicates
+  const streamingIdRef = useRef<string | null>(null);
 
   const setApiKey = useCallback((key: string) => {
     setApiKeyState(key);
@@ -32,25 +30,46 @@ export function useChat() {
   }, [setApiKeyState]);
 
   const sendMessage = useCallback(async (content: string) => {
-    // Prevent duplicate submissions
-    if (isLoadingRef.current) return;
+    // Prevent duplicate submissions - critical for StrictMode
+    if (isLoadingRef.current) {
+      console.log('Already loading, ignoring duplicate call');
+      return;
+    }
     
     if (!apiKey) {
       setError('Please enter your Groq API key first');
       return;
     }
 
+    // Abort any existing request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+
     const userMessage: Message = {
-      id: `user-${Date.now()}`,
+      id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       role: 'user',
       content,
       timestamp: Date.now(),
     };
 
-    // Get current messages from ref to avoid stale closure
-    const currentMessages = [...messagesRef.current, userMessage];
+    const assistantId = `assistant-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     
-    setMessages(currentMessages);
+    // Prevent duplicate streaming
+    if (streamingIdRef.current) {
+      console.log('Already streaming, ignoring');
+      return;
+    }
+    streamingIdRef.current = assistantId;
+
+    // Use functional update to get current messages
+    let currentMessages: Message[] = [];
+    setMessages(prev => {
+      currentMessages = [...prev, userMessage];
+      return currentMessages;
+    });
+
     setIsLoading(true);
     isLoadingRef.current = true;
     setError(null);
@@ -70,6 +89,7 @@ export function useChat() {
           })),
           stream: true,
         }),
+        signal: abortControllerRef.current.signal,
       });
 
       if (!response.ok) {
@@ -82,20 +102,24 @@ export function useChat() {
 
       const decoder = new TextDecoder();
       let assistantContent = '';
-      const assistantId = `assistant-${Date.now()}`;
 
-      // Add empty assistant message
-      const messagesWithAssistant = [...currentMessages, {
+      // Add empty assistant message using functional update
+      setMessages(prev => [...prev, {
         id: assistantId,
         role: 'assistant' as const,
         content: '',
         timestamp: Date.now(),
-      }];
-      setMessages(messagesWithAssistant);
+      }]);
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+
+        // Check if we're still the active stream
+        if (streamingIdRef.current !== assistantId) {
+          reader.cancel();
+          break;
+        }
 
         const chunk = decoder.decode(value, { stream: true });
         const lines = chunk.split('\n').filter(line => line.trim() !== '');
@@ -124,6 +148,10 @@ export function useChat() {
         }
       }
     } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        console.log('Request aborted');
+        return;
+      }
       const errorMessage = err instanceof Error ? err.message : 'An error occurred';
       setError(errorMessage);
       // Remove the empty assistant message on error
@@ -131,6 +159,8 @@ export function useChat() {
     } finally {
       setIsLoading(false);
       isLoadingRef.current = false;
+      streamingIdRef.current = null;
+      abortControllerRef.current = null;
     }
   }, [apiKey, setMessages]);
 
