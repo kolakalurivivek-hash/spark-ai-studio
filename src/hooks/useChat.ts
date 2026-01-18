@@ -16,13 +16,18 @@ export function useChat() {
   const [apiKey, setApiKeyState] = useLocalStorage<string>('groq-api-key', '');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
   // Use refs to prevent race conditions during streaming
   const isLoadingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
-  
+  const messagesRef = useRef<Message[]>([]);
+
   // Track current streaming message to prevent duplicates
   const streamingIdRef = useRef<string | null>(null);
+
+  // Keep messagesRef in sync (avoid stale closure)
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   const setApiKey = useCallback((key: string) => {
     setApiKeyState(key);
@@ -30,45 +35,41 @@ export function useChat() {
   }, [setApiKeyState]);
 
   const sendMessage = useCallback(async (content: string) => {
-    // Prevent duplicate submissions - critical for StrictMode
-    if (isLoadingRef.current) {
-      console.log('Already loading, ignoring duplicate call');
-      return;
-    }
-    
+    // Prevent duplicate submissions
+    if (isLoadingRef.current) return;
+
     if (!apiKey) {
       setError('Please enter your Groq API key first');
       return;
     }
 
     // Abort any existing request
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
+    abortControllerRef.current?.abort();
     abortControllerRef.current = new AbortController();
 
     const userMessage: Message = {
-      id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: `user-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       role: 'user',
       content,
       timestamp: Date.now(),
     };
 
-    const assistantId = `assistant-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    
-    // Prevent duplicate streaming
-    if (streamingIdRef.current) {
-      console.log('Already streaming, ignoring');
-      return;
-    }
+    const assistantId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     streamingIdRef.current = assistantId;
 
-    // Use functional update to get current messages
-    let currentMessages: Message[] = [];
-    setMessages(prev => {
-      currentMessages = [...prev, userMessage];
-      return currentMessages;
-    });
+    // Build messages from the ref (never rely on setState being synchronous)
+    const currentMessages = [...messagesRef.current, userMessage];
+
+    // Optimistically render user message + empty assistant message
+    setMessages([
+      ...currentMessages,
+      {
+        id: assistantId,
+        role: 'assistant',
+        content: '',
+        timestamp: Date.now(),
+      },
+    ]);
 
     setIsLoading(true);
     isLoadingRef.current = true;
@@ -79,14 +80,11 @@ export function useChat() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
+          Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
           model: MODEL,
-          messages: currentMessages.map(m => ({
-            role: m.role,
-            content: m.content,
-          })),
+          messages: currentMessages.map((m) => ({ role: m.role, content: m.content })),
           stream: true,
         }),
         signal: abortControllerRef.current.signal,
@@ -100,62 +98,63 @@ export function useChat() {
       const reader = response.body?.getReader();
       if (!reader) throw new Error('No response body');
 
+      // Robust SSE parsing (handles partial JSON across chunks)
       const decoder = new TextDecoder();
+      let buffer = '';
       let assistantContent = '';
+      let streamDone = false;
 
-      // Add empty assistant message using functional update
-      setMessages(prev => [...prev, {
-        id: assistantId,
-        role: 'assistant' as const,
-        content: '',
-        timestamp: Date.now(),
-      }]);
-
-      while (true) {
+      while (!streamDone) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        // Check if we're still the active stream
+        // If another stream started, stop processing this one
         if (streamingIdRef.current !== assistantId) {
-          reader.cancel();
+          await reader.cancel();
           break;
         }
 
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n').filter(line => line.trim() !== '');
+        buffer += decoder.decode(value, { stream: true });
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            if (data === '[DONE]') continue;
+        let newlineIndex: number;
+        while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+          let line = buffer.slice(0, newlineIndex);
+          buffer = buffer.slice(newlineIndex + 1);
 
-            try {
-              const parsed = JSON.parse(data);
-              const delta = parsed.choices?.[0]?.delta?.content;
-              if (delta) {
-                assistantContent += delta;
-                // Update only the assistant message content
-                setMessages(prev => prev.map(m => 
-                  m.id === assistantId 
-                    ? { ...m, content: assistantContent }
-                    : m
-                ));
-              }
-            } catch (e) {
-              // Skip invalid JSON (might be partial chunk)
+          if (line.endsWith('\r')) line = line.slice(0, -1);
+          if (line.startsWith(':') || line.trim() === '') continue;
+          if (!line.startsWith('data: ')) continue;
+
+          const jsonStr = line.slice(6).trim();
+          if (jsonStr === '[DONE]') {
+            streamDone = true;
+            break;
+          }
+
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const delta: string | undefined = parsed.choices?.[0]?.delta?.content;
+            if (delta) {
+              assistantContent += delta;
+              setMessages((prev) =>
+                prev.map((m) => (m.id === assistantId ? { ...m, content: assistantContent } : m))
+              );
             }
+          } catch {
+            // JSON split across chunks: put back and wait for more data
+            buffer = line + '\n' + buffer;
+            break;
           }
         }
       }
     } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        console.log('Request aborted');
-        return;
-      }
+      if (err instanceof Error && err.name === 'AbortError') return;
+
       const errorMessage = err instanceof Error ? err.message : 'An error occurred';
       setError(errorMessage);
+
       // Remove the empty assistant message on error
-      setMessages(prev => prev.filter(m => m.role === 'user' || m.content));
+      setMessages((prev) => prev.filter((m) => m.role === 'user' || m.content));
     } finally {
       setIsLoading(false);
       isLoadingRef.current = false;
