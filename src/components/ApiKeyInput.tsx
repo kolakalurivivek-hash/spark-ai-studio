@@ -36,9 +36,9 @@ export function ApiKeyInput({ apiKey, onApiKeyChange, error }: ApiKeyInputProps)
         <div className="p-2 rounded-lg bg-primary/20">
           <Key className="w-4 h-4 text-primary" />
         </div>
-        <span className="text-sm font-medium text-foreground">OpenRouter API Key</span>
+        <span className="text-sm font-medium text-foreground">Groq API Key</span>
         <a
-          href="https://openrouter.ai/keys"
+          href="https://console.groq.com/keys"
           target="_blank"
           rel="noopener noreferrer"
           className="ml-auto text-xs text-muted-foreground hover:text-primary flex items-center gap-1 transition-colors"
@@ -61,7 +61,7 @@ export function ApiKeyInput({ apiKey, onApiKeyChange, error }: ApiKeyInputProps)
                 type={showKey ? 'text' : 'password'}
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
-                placeholder="sk-or-v1-..."
+                placeholder="gsk_..."
                 className="pr-10 bg-background/50 border-border/50 focus:border-primary transition-colors"
               />
               <button

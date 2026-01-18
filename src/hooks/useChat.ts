@@ -8,12 +8,12 @@ export interface Message {
   timestamp: number;
 }
 
-const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const MODEL = 'openai/gpt-4o-mini';
+const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
+const MODEL = 'llama-3.1-8b-instant';
 
 export function useChat() {
   const [messages, setMessages] = useLocalStorage<Message[]>('chat-messages', []);
-  const [apiKey, setApiKeyState] = useLocalStorage<string>('openrouter-api-key', '');
+  const [apiKey, setApiKeyState] = useLocalStorage<string>('groq-api-key', '');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,7 +24,7 @@ export function useChat() {
 
   const sendMessage = useCallback(async (content: string) => {
     if (!apiKey) {
-      setError('Please enter your OpenRouter API key first');
+      setError('Please enter your Groq API key first');
       return;
     }
 
@@ -40,13 +40,11 @@ export function useChat() {
     setError(null);
 
     try {
-      const response = await fetch(OPENROUTER_API_URL, {
+      const response = await fetch(GROQ_API_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey}`,
-          'HTTP-Referer': window.location.origin,
-          'X-Title': 'Cyber Chat',
         },
         body: JSON.stringify({
           model: MODEL,
