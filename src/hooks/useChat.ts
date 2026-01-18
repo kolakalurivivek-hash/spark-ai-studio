@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useLocalStorage } from './useLocalStorage';
 
 export interface Message {
@@ -19,10 +19,12 @@ export function useChat() {
   
   // Use refs to prevent race conditions during streaming
   const isLoadingRef = useRef(false);
-  const messagesRef = useRef(messages);
+  const messagesRef = useRef<Message[]>([]);
   
-  // Keep messagesRef in sync
-  messagesRef.current = messages;
+  // Keep messagesRef in sync using useEffect (not during render)
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   const setApiKey = useCallback((key: string) => {
     setApiKeyState(key);
